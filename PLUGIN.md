@@ -1,8 +1,8 @@
 ---
 id: syncthing
 name: Syncthing
-version: 1.0.0
-author: Loam contributors
+version: 1.0.1
+author: Michael Hejazi
 api: 0
 kind: [extension]
 icon: assets/icon.svg
