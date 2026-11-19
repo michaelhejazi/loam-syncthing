@@ -1,7 +1,7 @@
 ---
 id: syncthing
 name: Syncthing
-version: 1.0.2
+version: 1.0.3
 author: Michael Hejazi
 api: 0
 kind: [extension]
