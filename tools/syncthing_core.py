@@ -3,26 +3,24 @@ configuration through its REST API on this machine, so an agent can tell the
 person whether their vault is syncing and pair a new device with it.
 
 Standard library only. It talks to one address: Syncthing's control address
-on this machine, read with its API key from Syncthing's own ``config.xml``.
+on this machine, supplied with its API key by Loam.
 It never contacts anything else and never reads the vault's files; Syncthing
 itself moves them.
 
 Environment (Loam gives every plugin process these):
 
 - ``LOAM_VAULT``: the vault, the folder this plugin shares.
-- ``SYNCTHING_CONFIG``: optional, Syncthing's ``config.xml`` when it is not
-  in one of the usual places (tests, or a Syncthing run with ``--home``).
+- ``LOAM_PLUGIN_KEYS``: the file Loam writes with the declared provider key
+  and the local GUI URL.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
 import ssl
-import urllib.error
-import urllib.request
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 VAULT_FOLDER_ID = "loam-vault"
@@ -31,63 +29,62 @@ SETUP = ("Syncthing is not running on this machine. To set it up: install it "
          "(on Debian or Ubuntu, `sudo apt install syncthing`), then start it as "
          "your own user with `systemctl --user enable --now syncthing.service`, "
          "and ask again.")
+NO_KEY = ("Loam has not supplied a Syncthing API key yet. Make sure Syncthing’s "
+          "GUI is running on 127.0.0.1 and check Settings › Connections › API keys.")
 
 
 class SyncthingError(Exception):
     """Something the person or the agent can act on, in a sentence."""
 
 
-def config_paths() -> list[Path]:
-    env = os.environ.get("SYNCTHING_CONFIG")
-    if env:
-        return [Path(env)]
-    home = Path.home()
-    state = Path(os.environ.get("XDG_STATE_HOME") or home / ".local" / "state")
-    conf = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
-    return [state / "syncthing" / "config.xml", conf / "syncthing" / "config.xml"]
-
-
-def gui() -> tuple[str, str]:
-    """Syncthing's control address (a URL) and its API key."""
-    for path in config_paths():
-        try:
-            root = ET.parse(path).getroot()
-        except FileNotFoundError:
-            continue
-        except (OSError, ET.ParseError) as exc:
-            raise SyncthingError(f"Syncthing's config at {path} cannot be read ({exc})") from None
-        node = root.find("gui")
-        if node is None:
-            raise SyncthingError(f"Syncthing's config at {path} has no control address")
-        address = (node.findtext("address") or "127.0.0.1:8384").strip()
-        key = (node.findtext("apikey") or "").strip()
-        if not key:
-            raise SyncthingError("Syncthing has no API key yet; open its web page once, or restart it")
-        scheme = "https" if node.get("tls") == "true" else "http"
-        host, _, port = address.rpartition(":")
-        if host in ("0.0.0.0", "", "[::]", "::"):
-            host = "127.0.0.1"
-        return f"{scheme}://{host}:{port}", key
-    raise SyncthingError(SETUP)
+def gui() -> tuple[int, bool, str]:
+    """Syncthing's loopback port, TLS setting and API key."""
+    path = os.environ.get("LOAM_PLUGIN_KEYS")
+    if not path:
+        raise SyncthingError(NO_KEY)
+    try:
+        values = dict(line.split("=", 1) for line in Path(path).read_text().splitlines()
+                      if "=" in line and not line.startswith("#"))
+    except (OSError, UnicodeError):
+        raise SyncthingError(NO_KEY) from None
+    key = values.get("SYNCTHING_API_KEY")
+    if not key:
+        raise SyncthingError(NO_KEY)
+    url = values.get("SYNCTHING_GUI_URL") or "http://127.0.0.1:8384"
+    target = re.fullmatch(r"(https?)://127\.0\.0\.1:([0-9]{1,5})", url)
+    if not target or not 1 <= int(target[2]) <= 65535:
+        raise SyncthingError("Syncthing's control address must use 127.0.0.1 and a valid port")
+    return int(target[2]), target[1] == "https", key
 
 
 def call(method: str, path: str, body=None):
-    base, key = gui()
-    req = urllib.request.Request(base + path, method=method,
-                                 data=None if body is None else json.dumps(body).encode(),
-                                 headers={"X-API-Key": key, "Content-Type": "application/json"})
-    # The control address is this machine's own; with TLS it is Syncthing's
-    # self-signed certificate.
-    ctx = ssl._create_unverified_context() if base.startswith("https") else None  # noqa: S323
+    port, tls, key = gui()
+    # Use a direct connection to the declared IP. HTTPConnection does not
+    # use proxies or follow redirects.
+    if tls:
+        # Syncthing's loopback GUI can use a self-signed certificate.
+        connection = http.client.HTTPSConnection(
+            "127.0.0.1", port, timeout=15, context=ssl._create_unverified_context())  # noqa: S323
+    else:
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
     try:
-        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
-            raw = resp.read()
-    except urllib.error.HTTPError as exc:
-        said = exc.read().decode("utf-8", "replace").strip()[:200]
-        raise SyncthingError(f"Syncthing answered {exc.code} for {path}: {said}") from None
-    except (urllib.error.URLError, OSError):
+        connection.request(method, path, body=None if body is None else json.dumps(body).encode(),
+                           headers={"X-API-Key": key, "Content-Type": "application/json"})
+        with connection.getresponse() as response:
+            if response.status in (401, 403):
+                raise SyncthingError("Syncthing rejected its API key. Loam will check its local "
+                                     "settings again. Try again in a few minutes.")
+            if not 200 <= response.status < 300:
+                raise SyncthingError(f"Syncthing answered HTTP {response.status} for {path}")
+            raw = response.read()
+    except (http.client.HTTPException, OSError):
         raise SyncthingError(SETUP) from None
-    return json.loads(raw) if raw.strip() else None
+    finally:
+        connection.close()
+    try:
+        return json.loads(raw) if raw.strip() else None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise SyncthingError(f"Syncthing returned an unreadable response for {path}") from None
 
 
 def vault() -> Path | None:

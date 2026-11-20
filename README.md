@@ -26,7 +26,7 @@ can pair a new device for you and tell you whether syncing is working.
 
 ## How to use it
 
-1. Get it from **Settings › Market › Syncthing**.
+1. On Loam 0.2.15 or later, get it from **Settings › Market › Syncthing**.
 2. Make sure Syncthing runs on your Loam's server and on your device (ask an
    agent if it isn't running on the server; it will tell you how).
 3. On your device, find its ID (Actions › Show ID), and tell an agent:
@@ -36,8 +36,11 @@ can pair a new device for you and tell you whether syncing is working.
 ## What you need, and what leaves your server
 
 Syncthing on the machine Loam is on (as your own user) and on each device you
-want the vault on. No key and no account. Your vault goes only to the devices
-you paired, both ways, conversations and your agents' shared memory included.
+want the vault on. On install, Loam shows where it will read the Syncthing
+API key on this server. After you confirm, Loam saves the key in Settings ›
+Connections › API keys and gives it to the plugin. Your vault goes only to
+the devices you paired, both ways, conversations and your agents' shared
+memory included.
 
 ---
 
@@ -46,7 +49,9 @@ you paired, both ways, conversations and your agents' shared memory included.
 ### What it touches
 
 - **Syncthing's own control address on this machine** (127.0.0.1), to read
-  and change which devices share your vault. Nothing else on the network.
+  and change which devices share your vault. Set the GUI address in Syncthing
+  to `127.0.0.1:<port>` or `localhost:<port>`. The plugin connects directly
+  to 127.0.0.1 and refuses wildcard binds, other hosts and HTTP redirects.
 - **Your vault, both ways**: what a paired device changes arrives in the
   vault, threads and agents' memory included, and what changes here goes out.
 - **Syncthing's transfer port**, which it declares so Loam's checks expect it.
@@ -63,17 +68,21 @@ kept out of it) if it is not one yet. To start Syncthing on the server:
 In Settings › Plugins, with its link:
 
 ```
-https://github.com/michaelhejazi/loam-syncthing/tree/v1.0.3
+https://github.com/michaelhejazi/loam-syncthing/tree/v1.1.0
 ```
 
 ### For builders
 
 [PLUGIN.md](PLUGIN.md) is its manifest. It needs only Python 3.11's standard
 library: `tools/syncthing_mcp.py` is the agents' tool (MCP over stdio), and
-`tools/syncthing_core.py` talks to Syncthing's REST API on loopback with the
-API key from Syncthing's `config.xml`. `python3 tests/test_syncthing.py` runs
-it against a fake Syncthing, with no network. The pictures are from Loam's
-demo world (`app/tools/capture-plugin-shots.mjs`).
+`tools/syncthing_core.py` talks to Syncthing's REST API on loopback. Version
+1.1.0 requires Loam's local key import support. Its new install declaration
+names the two standard locations of Syncthing's GUI settings and the
+`gui/apikey` value. Loam reads the settings and supplies the resulting key
+and loopback address in `LOAM_PLUGIN_KEYS`, the only credential file the
+plugin opens. `python3 tests/test_syncthing.py` runs it against a fake
+Syncthing on loopback. The pictures are from Loam's demo world
+(`app/tools/capture-plugin-shots.mjs`).
 
 ## Made by
 

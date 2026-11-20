@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The Syncthing plugin against a fake Syncthing (its REST API on loopback,
-its config.xml in a scratch folder). No network, no real Syncthing.
+"""The Syncthing plugin against a fake API on loopback, with keys supplied
+as Loam supplies them.
 
 Run: python3 tests/test_syncthing.py
 """
@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="test-syncthing-"))
@@ -45,6 +46,11 @@ class Fake(http.server.BaseHTTPRequestHandler):
         if self.headers.get("X-API-Key") != KEY:
             return self._send(403, {"error": "key"})
         path, _, query = self.path.partition("?")
+        if path == "/redirect":
+            self.send_response(302)
+            self.send_header("Location", "/rest/system/status")
+            self.end_headers()
+            return
         if (method, path) == ("GET", "/rest/system/status"):
             return self._send(200, {"myID": ME})
         if (method, path) == ("GET", "/rest/config/devices"):
@@ -95,10 +101,16 @@ class Fake(http.server.BaseHTTPRequestHandler):
 
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fake)
 threading.Thread(target=server.serve_forever, daemon=True).start()
-CONFIG = TMP / "config.xml"
-CONFIG.write_text(f'<configuration><gui enabled="true" tls="false"><address>0.0.0.0:{server.server_address[1]}</address>'
-                  f"<apikey>{KEY}</apikey></gui></configuration>")
-os.environ.update(SYNCTHING_CONFIG=str(CONFIG), LOAM_VAULT=str(VAULT))
+KEYS = TMP / "keys.env"
+PORT = server.server_address[1]
+
+
+def write_keys(url, key=KEY):
+    KEYS.write_text(f"SYNCTHING_GUI_URL={url}\nSYNCTHING_API_KEY={key}\n")
+
+
+write_keys(f"http://127.0.0.1:{PORT}")
+os.environ.update(LOAM_PLUGIN_KEYS=str(KEYS), LOAM_VAULT=str(VAULT))
 sys.path.insert(0, str(HERE / "tools"))
 import syncthing_core as core  # noqa: E402
 
@@ -113,7 +125,28 @@ def check(label, ok, detail=""):
 s = core.status()
 check("running, with this machine's ID", s["running"] and s["this_device_id"] == ME, s)
 check("an unshared vault says what to do next", not s["vault_shared"] and "device's ID" in s["next"], s)
-check("a wildcard control address is reached on loopback", SEEN and SEEN[0][1] == "/rest/system/status")
+check("the supplied URL reaches the API on 127.0.0.1", SEEN and SEEN[0][1] == "/rest/system/status")
+
+for address in (f"192.0.2.1:{PORT}", f"0.0.0.0:{PORT}", f"localhost:{PORT}",
+                f"127.0.0.1.example:{PORT}", f"[::]:{PORT}",
+                f"127.0.0.1@192.0.2.1:{PORT}", "127.0.0.1:65536"):
+    write_keys(f"http://{address}")
+    with patch.object(core.http.client, "HTTPConnection") as connect:
+        s = core.status()
+        check(f"{address} is refused before connecting",
+              not s["running"] and "control address" in s["next"] and not connect.called, s)
+write_keys(f"http://127.0.0.1:{PORT}", "old-fixture-key")
+check("a rejected key says Loam will check the local settings", "Loam will check" in core.status()["next"])
+write_keys(f"http://127.0.0.1:{PORT}")
+
+with patch.dict(os.environ, {"http_proxy": f"http://127.0.0.1:{PORT}", "no_proxy": ""}):
+    check("the API request goes straight to Syncthing even with a proxy set",
+          core.status()["running"] and SEEN[-1][1] == "/rest/system/connections", SEEN)
+try:
+    core.call("GET", "/redirect")
+    check("the client refuses a redirect", False)
+except core.SyncthingError as exc:
+    check("the client refuses a redirect", "HTTP 302" in str(exc) and SEEN[-1][1] == "/redirect", exc)
 
 for bad in ("short", ME.replace("A", "1"), ""):
     try:
@@ -177,8 +210,8 @@ server.shutdown()
 server.server_close()
 s = core.status()
 check("Syncthing not running says how to set it up", s == {"ok": True, "running": False, "next": core.SETUP}, s)
-os.environ["SYNCTHING_CONFIG"] = str(TMP / "absent.xml")
-check("no config at all says the same", core.status()["next"] == core.SETUP)
+KEYS.unlink()
+check("missing credentials take the owner to Loam’s API keys", core.status()["next"] == core.NO_KEY)
 
 failed = results.count(False)
 print(f"\n{len(results) - failed}/{len(results)} passed")

@@ -57,7 +57,7 @@ def handle(msg: dict):
         return {"jsonrpc": "2.0", "id": mid, "result": {
             "protocolVersion": (msg.get("params") or {}).get("protocolVersion") or PROTOCOL,
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syncthing", "version": "1.0.0"}}}
+            "serverInfo": {"name": "syncthing", "version": "1.1.0"}}}
     if method == "ping":
         return {"jsonrpc": "2.0", "id": mid, "result": {}}
     if method == "tools/list":

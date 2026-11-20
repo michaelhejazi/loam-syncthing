@@ -1,7 +1,7 @@
 ---
 id: syncthing
 name: Syncthing
-version: 1.0.3
+version: 1.1.0
 author: Michael Hejazi
 api: 0
 kind: [extension]
@@ -10,6 +10,13 @@ screenshots:
   - {src: assets/shots/syncthing-pair.webp, src_dark: assets/shots/syncthing-pair-dark.webp, caption: "Ask an agent to pair your phone; it tells you the two taps left."}
   - {src: assets/shots/syncthing-status.webp, src_dark: assets/shots/syncthing-status-dark.webp, caption: "Ask how syncing is going, any time."}
 icon: assets/icon.svg
+keys:
+  - provider: syncthing
+    why: Lets the plugin read and change which devices share your vault
+    source:
+      path: "~/.local/state/syncthing/config.xml"
+      fallback: "~/.config/syncthing/config.xml"
+      xml: gui/apikey
 touches:
   network:
     - host: 127.0.0.1
@@ -54,7 +61,10 @@ lets your agents set it up and tell you how it is going.
 ## Technical details
 
 The plugin's own code talks only to Syncthing's control address on this
-machine (`127.0.0.1`), with the key in Syncthing's own config. Syncthing then
+machine (`127.0.0.1`). When you install, Loam reads the key and local GUI
+address from Syncthing's settings on this server, as shown on the install
+card. Loam saves the key in Settings › Connections › API keys and supplies
+it to the plugin. Syncthing then
 carries the whole vault both ways between this machine and the devices you
 paired, conversation records and shared memory included, which is why it
 declares that it reads and changes both. The vault becomes a Syncthing
