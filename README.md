@@ -68,7 +68,7 @@ kept out of it) if it is not one yet. To start Syncthing on the server:
 In Settings › Plugins, with its link:
 
 ```
-https://github.com/michaelhejazi/loam-syncthing/tree/v1.1.0
+https://github.com/michaelhejazi/loam-syncthing/tree/v1.1.1
 ```
 
 ### For builders

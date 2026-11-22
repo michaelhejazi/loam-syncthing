@@ -1,7 +1,7 @@
 ---
 id: syncthing
 name: Syncthing
-version: 1.1.0
+version: 1.1.1
 author: Michael Hejazi
 api: 0
 kind: [extension]
@@ -9,7 +9,7 @@ description: "Your notes on your own phone and laptop, kept in sync with no clou
 screenshots:
   - {src: assets/shots/syncthing-pair.webp, src_dark: assets/shots/syncthing-pair-dark.webp, caption: "Ask an agent to pair your phone; it tells you the two taps left."}
   - {src: assets/shots/syncthing-status.webp, src_dark: assets/shots/syncthing-status-dark.webp, caption: "Ask how syncing is going, any time."}
-icon: assets/icon.svg
+icon: assets/icon.webp
 keys:
   - provider: syncthing
     why: Lets the plugin read and change which devices share your vault
